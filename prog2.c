@@ -1,5 +1,10 @@
 #include <stdio.h>
 
+/**
+ * Assignment 2
+ * Jonathon Gebhardt 
+ **/
+
 /* ******************************************************************
  ALTERNATING BIT AND GO-BACK-N NETWORK EMULATOR: VERSION 1.1  J.F.Kurose
 
@@ -37,10 +42,38 @@ struct pkt
 };
 
 /********* STUDENTS WRITE THE NEXT SEVEN ROUTINES *********/
+#define A 0
+#define B 1
+
+int a_seqnum;
+int b_seqnum;
+int a_acknum;
+int b_acknum;
 
 /* called from layer 5, passed the data to be sent to other side */
 A_output(message) struct msg message;
 {
+  struct pkt p;
+  p.seqnum = a_seqnum;
+  p.acknum = a_acknum;
+
+  // calculate checksum
+  int checksum;
+  checksum = p.seqnum + p.acknum;
+
+  strcpy(p.payload, message.data);
+
+  for (int i = 0; i < sizeof(p.payload); ++i)
+  {
+    checksum += p.payload[i];
+  }
+
+  p.checksum = checksum;
+
+  // start timer
+  starttimer(A, 6);
+
+  tolayer3(A, p);
 }
 
 B_output(message) /* need be completed only for extra credit */
@@ -51,17 +84,48 @@ B_output(message) /* need be completed only for extra credit */
 /* called from layer 3, when a packet arrives for layer 4 */
 A_input(packet) struct pkt packet;
 {
+  // verify checksum
+  int checksum;
+  checksum = packet.seqnum + packet.acknum;
+
+  for (int i = 0; i < sizeof(packet.payload); ++i)
+  {
+    checksum += packet.payload[i];
+  }
+
+  if (packet.checksum != checksum)
+  {
+    printf("A: bad checksum, retransmit\n");
+    // ask for retransmit
+  }
+
+  // confirm acknum
+  if (packet.seqnum != a_acknum)
+  {
+    printf("A: bad seqnum, retransmit\n");
+    // ask for retransmit
+  }
+
+  stoptimer(A);
+  printf("A: good checksum and seqnum -- %d\n", a_acknum);
+  a_acknum = (a_acknum + 1) % 2;
+  a_seqnum = (a_seqnum + 1) % 2;
 }
 
 /* called when A's timer goes off */
 A_timerinterrupt()
 {
+  // retransmit
+  printf("A_timerintterupt\n");
 }
 
 /* the following routine will be called once (only) before any other */
 /* entity A routines are called. You can use it to do any initialization */
 A_init()
 {
+  a_acknum = 0;
+  a_seqnum = 0;
+  // determine RTT
 }
 
 /* Note that with simplex transfer from a-to-B, there is no B_output() */
@@ -69,17 +133,54 @@ A_init()
 /* called from layer 3, when a packet arrives for layer 4 at B*/
 B_input(packet) struct pkt packet;
 {
+  // verify checksum
+  int checksum;
+  checksum = packet.seqnum + packet.acknum;
+
+  for (int i = 0; i < sizeof(packet.payload); ++i)
+  {
+    checksum += packet.payload[i];
+  }
+
+  struct pkt response;
+  if (packet.checksum != checksum)
+  {
+    printf("B: bad checksum, retransmit\n");
+    // ask for retransmit
+  }
+
+  // confirm acknum
+  if (packet.seqnum != b_acknum)
+  {
+    printf("B: bad seqnum, retransmit\n");
+    // ask for retransmit
+  }
+
+  printf("B: good checksum and seqnum -- %d\n", b_acknum);
+
+  response.seqnum = b_seqnum;
+  response.acknum = b_acknum;
+  response.checksum = b_seqnum + b_acknum;
+  memset(response.payload, '\0', sizeof(response.payload));
+
+  b_acknum = (b_acknum + 1) % 2;
+  b_seqnum = (b_seqnum + 1) % 2;
+
+  tolayer3(B, response);
 }
 
 /* called when B's timer goes off */
 B_timerinterrupt()
 {
+  // retransmit
 }
 
 /* the following rouytine will be called once (only) before any other */
 /* entity B routines are called. You can use it to do any initialization */
 B_init()
 {
+  b_acknum = 0;
+  b_seqnum = 0;
 }
 
 /*****************************************************************
@@ -116,8 +217,6 @@ struct event *evlist = NULL; /* the event list */
 
 #define OFF 0
 #define ON 1
-#define A 0
-#define B 1
 
 int TRACE = 1;   /* for my debugging */
 int nsim = 0;    /* number of messages from 5 to 4 so far */
@@ -239,13 +338,13 @@ init() /* initialize the simulator */
   printf("-----  Stop and Wait Network Simulator Version 1.1 -------- \n\n");
   printf("Enter the number of messages to simulate: ");
   scanf("%d", &nsimmax);
-  printf("Enter  packet loss probability [enter 0.0 for no loss]:");
+  printf("Enter packet loss probability [enter 0.0 for no loss]: ");
   scanf("%f", &lossprob);
-  printf("Enter packet corruption probability [0.0 for no corruption]:");
+  printf("Enter packet corruption probability [0.0 for no corruption]: ");
   scanf("%f", &corruptprob);
-  printf("Enter average time between messages from sender's layer5 [ > 0.0]:");
+  printf("Enter average time between messages from sender's layer5 [ > 0.0]: ");
   scanf("%f", &lambda);
-  printf("Enter TRACE:");
+  printf("Enter TRACE: ");
   scanf("%d", &TRACE);
 
   srand(9999); /* init random number generator */
@@ -260,7 +359,7 @@ init() /* initialize the simulator */
     printf("It is likely that random number generation on your machine\n");
     printf("is different from what this emulator expects.  Please take\n");
     printf("a look at the routine jimsrand() in the emulator code. Sorry. \n");
-    exit();
+    exit(0);
   }
 
   ntolayer3 = 0;
