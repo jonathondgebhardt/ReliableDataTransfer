@@ -46,23 +46,29 @@ struct pkt
 #define B 1
 
 int a_seqnum;
-int b_seqnum;
 int a_acknum;
+int a_timer_inc;
+struct msg a_prev_msg;
+
+int b_seqnum;
 int b_acknum;
+struct pkt b_prev_pkt;
 
 /* called from layer 5, passed the data to be sent to other side */
 A_output(message) struct msg message;
 {
+  // Save packet in case of retransmit.
+  memcpy(&a_prev_msg, &message, sizeof(message));
+
   struct pkt p;
   p.seqnum = a_seqnum;
   p.acknum = a_acknum;
 
-  // calculate checksum
+  // Calculate checksum.
   int checksum;
   checksum = p.seqnum + p.acknum;
 
   strcpy(p.payload, message.data);
-
   for (int i = 0; i < sizeof(p.payload); ++i)
   {
     checksum += p.payload[i];
@@ -70,10 +76,9 @@ A_output(message) struct msg message;
 
   p.checksum = checksum;
 
-  // start timer
-  starttimer(A, 6);
-
+  // Send packet and start timer.
   tolayer3(A, p);
+  starttimer(A, a_timer_inc);
 }
 
 B_output(message) /* need be completed only for extra credit */
@@ -84,7 +89,7 @@ B_output(message) /* need be completed only for extra credit */
 /* called from layer 3, when a packet arrives for layer 4 */
 A_input(packet) struct pkt packet;
 {
-  // verify checksum
+  // Verify checksum.
   int checksum;
   checksum = packet.seqnum + packet.acknum;
 
@@ -93,30 +98,29 @@ A_input(packet) struct pkt packet;
     checksum += packet.payload[i];
   }
 
-  if (packet.checksum != checksum)
+  if (packet.checksum != checksum || packet.seqnum != a_acknum)
   {
-    printf("A: bad checksum, retransmit\n");
+    printf("A: bad checksum or bad seqnum, retransmit\n");
     // ask for retransmit
+    // tolayer3(A, a_prev_pkt);
+    A_output(a_prev_msg);
   }
-
-  // confirm acknum
-  if (packet.seqnum != a_acknum)
+  else
   {
-    printf("A: bad seqnum, retransmit\n");
-    // ask for retransmit
+    stoptimer(A);
+    printf("A: good checksum and seqnum -- %d\n", a_acknum);
+    a_acknum = (a_acknum + 1) % 2;
+    a_seqnum = (a_seqnum + 1) % 2;
   }
-
-  stoptimer(A);
-  printf("A: good checksum and seqnum -- %d\n", a_acknum);
-  a_acknum = (a_acknum + 1) % 2;
-  a_seqnum = (a_seqnum + 1) % 2;
 }
 
 /* called when A's timer goes off */
 A_timerinterrupt()
 {
-  // retransmit
-  printf("A_timerintterupt\n");
+  // If A's timer expires, that means a packet was lost (i.e., not ACK'd)
+  // so retransmit.
+  printf("A: timerintterupt\n");
+  A_output(a_prev_msg);
 }
 
 /* the following routine will be called once (only) before any other */
@@ -125,6 +129,7 @@ A_init()
 {
   a_acknum = 0;
   a_seqnum = 0;
+  a_timer_inc = 6;
   // determine RTT
 }
 
@@ -143,36 +148,32 @@ B_input(packet) struct pkt packet;
   }
 
   struct pkt response;
-  if (packet.checksum != checksum)
+  if (packet.checksum != checksum || packet.seqnum != b_acknum)
   {
-    printf("B: bad checksum, retransmit\n");
+    printf("B: bad checksum or bad seqnum, retransmit\n");
     // ask for retransmit
   }
-
-  // confirm acknum
-  if (packet.seqnum != b_acknum)
+  else
   {
-    printf("B: bad seqnum, retransmit\n");
-    // ask for retransmit
+    printf("B: good checksum and seqnum -- %d\n", b_acknum);
+
+    response.seqnum = b_seqnum;
+    response.acknum = b_acknum;
+    response.checksum = b_seqnum + b_acknum;
+    memset(response.payload, '\0', sizeof(response.payload));
+
+    b_acknum = (b_acknum + 1) % 2;
+    b_seqnum = (b_seqnum + 1) % 2;
+
+    tolayer3(B, response);
   }
-
-  printf("B: good checksum and seqnum -- %d\n", b_acknum);
-
-  response.seqnum = b_seqnum;
-  response.acknum = b_acknum;
-  response.checksum = b_seqnum + b_acknum;
-  memset(response.payload, '\0', sizeof(response.payload));
-
-  b_acknum = (b_acknum + 1) % 2;
-  b_seqnum = (b_seqnum + 1) % 2;
-
-  tolayer3(B, response);
 }
 
 /* called when B's timer goes off */
 B_timerinterrupt()
 {
   // retransmit
+  printf("B: timerintterupt\n");
 }
 
 /* the following rouytine will be called once (only) before any other */
