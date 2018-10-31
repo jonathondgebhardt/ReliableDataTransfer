@@ -48,7 +48,7 @@ struct pkt
 int a_seqnum;
 int a_acknum;
 int a_timer_inc;
-struct msg a_prev_msg;
+struct pkt *a_prev_pkt;
 
 int b_seqnum;
 int b_acknum;
@@ -57,9 +57,6 @@ struct pkt b_prev_pkt;
 /* called from layer 5, passed the data to be sent to other side */
 A_output(message) struct msg message;
 {
-  // Save packet in case of retransmit.
-  memcpy(&a_prev_msg, &message, sizeof(message));
-
   struct pkt p;
   p.seqnum = a_seqnum;
   p.acknum = a_acknum;
@@ -76,9 +73,15 @@ A_output(message) struct msg message;
 
   p.checksum = checksum;
 
-  // Send packet and start timer.
-  tolayer3(A, p);
+  // Save packet in case of retransmit.
+  a_prev_pkt = (struct pkt *)malloc(sizeof(struct pkt));
+  a_prev_pkt->seqnum = p.seqnum;
+  a_prev_pkt->acknum = p.acknum;
+  a_prev_pkt->checksum = p.checksum;
+
+  // Start timer and send packet.
   starttimer(A, a_timer_inc);
+  tolayer3(A, p);
 }
 
 B_output(message) /* need be completed only for extra credit */
@@ -102,8 +105,8 @@ A_input(packet) struct pkt packet;
   {
     printf("A: bad checksum or bad seqnum, retransmit\n");
     // ask for retransmit
-    // tolayer3(A, a_prev_pkt);
-    A_output(a_prev_msg);
+    starttimer(A, a_timer_inc);
+    tolayer3(A, *a_prev_pkt);
   }
   else
   {
@@ -111,6 +114,13 @@ A_input(packet) struct pkt packet;
     printf("A: good checksum and seqnum -- %d\n", a_acknum);
     a_acknum = (a_acknum + 1) % 2;
     a_seqnum = (a_seqnum + 1) % 2;
+
+    // pass packet to layer 5
+    struct msg m;
+    strcpy(m.data, packet.payload);
+    printf("A: passing message to layer 5\n");
+    tolayer5(A, m);
+    printf("A: to layer 5 returned\n");
   }
 }
 
@@ -120,7 +130,7 @@ A_timerinterrupt()
   // If A's timer expires, that means a packet was lost (i.e., not ACK'd)
   // so retransmit.
   printf("A: timerintterupt\n");
-  A_output(a_prev_msg);
+  A_output(*a_prev_pkt);
 }
 
 /* the following routine will be called once (only) before any other */
@@ -164,6 +174,11 @@ B_input(packet) struct pkt packet;
 
     b_acknum = (b_acknum + 1) % 2;
     b_seqnum = (b_seqnum + 1) % 2;
+
+    // pass packet to layer 5
+    struct msg m;
+    m.data = packet.payload;
+    tolayer5(B, m);
 
     tolayer3(B, response);
   }
