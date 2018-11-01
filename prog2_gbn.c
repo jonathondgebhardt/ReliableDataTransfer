@@ -53,7 +53,13 @@ float timer_inc;
 
 int a_seqnum;
 int a_acknum;
-struct pkt *a_buffer;
+int a_window;
+struct node
+{
+  struct pkt *p;
+  struct node *next;
+};
+struct node *buffer;
 
 int b_seqnum;
 int b_acknum;
@@ -79,16 +85,38 @@ A_output(message) struct msg message;
 
   strcpy(p.payload, message.data);
 
-  // TODO: Add packet to buffer instead
-  // Save packet in case of retransmit.
-  // a_prev_pkt->seqnum = p.seqnum;
-  // a_prev_pkt->acknum = p.acknum;
-  // a_prev_pkt->checksum = p.checksum;
+  // Add packet to buffer and decrement window size.
+  struct pkt *push_back = malloc(sizeof(struct pkt));
+  push_back->seqnum = p.seqnum;
+  push_back->acknum = p.acknum;
+  push_back->checksum = p.checksum;
 
-  // for (int i = 0; i < sizeof(p.payload); ++i)
-  // {
-  //   a_prev_pkt->payload[i] = p.payload[i];
-  // }
+  for (int i = 0; i < sizeof(p.payload); ++i)
+  {
+    push_back->payload[i] = p.payload[i];
+  }
+
+  struct node *current = buffer;
+  int count = 0;
+  printf("node %d: %d\n", count, current);
+  while (current != NULL)
+  {
+    if (current->next == NULL)
+    {
+      current->next = malloc(sizeof(struct node));
+      current = current->next;
+
+      current->p = push_back;
+      current->next = NULL;
+
+      a_window--;
+      printf("node %d: %d\n", count, current);
+      break;
+    }
+
+    current = current->next;
+    printf("node %d: %d\n", count, current);
+  }
 
   // Start timer and transmit packet.
   starttimer(A, timer_inc);
@@ -146,7 +174,10 @@ A_init()
   a_acknum = 0;
   a_seqnum = 0;
   timer_inc = 12.0;
-  a_buffer = NULL;
+  a_window = 50;
+  buffer = malloc(sizeof(struct node));
+  buffer->p = NULL;
+  buffer->next = NULL;
   // determine RTT
 }
 
