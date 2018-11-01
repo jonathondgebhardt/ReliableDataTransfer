@@ -58,6 +58,7 @@ struct node
 {
   struct pkt *p;
   struct node *next;
+  int status;
 };
 struct node *buffer;
 
@@ -78,7 +79,7 @@ A_output(message) struct msg message;
 
   // Prepare packet for transmit.
   struct pkt p = {
-      a_seqnum,
+      a_seqnum++,
       a_acknum,
       checksum,
   };
@@ -96,27 +97,19 @@ A_output(message) struct msg message;
     push_back->payload[i] = p.payload[i];
   }
 
+  // Find end of list and insert. Leave the head in tact.
   struct node *current = buffer;
-  int count = 0;
-  printf("node %d: %d\n", count, current);
-  while (current != NULL)
+  while (current->next != NULL)
   {
-    if (current->next == NULL)
-    {
-      current->next = malloc(sizeof(struct node));
-      current = current->next;
-
-      current->p = push_back;
-      current->next = NULL;
-
-      a_window--;
-      printf("node %d: %d\n", count, current);
-      break;
-    }
-
     current = current->next;
-    printf("node %d: %d\n", count, current);
   }
+
+  current->next = malloc(sizeof(struct node));
+  current->next->p = push_back;
+  current->next->next = NULL;
+  current->next->status = 0;
+
+  a_window--;
 
   // Start timer and transmit packet.
   starttimer(A, timer_inc);
@@ -143,19 +136,29 @@ A_input(packet) struct pkt packet;
   }
 
   // Corrupted packet or NAK, retransmit.
-  if (packet.checksum != checksum || packet.seqnum == -1)
+  if (packet.checksum != checksum)
   {
     starttimer(A, timer_inc);
     // tolayer3(A, *a_prev_pkt);
   }
 
   // ACK, move on.
-  else if (packet.seqnum == a_acknum)
+  else
   {
-    tolayer5(A, packet.payload);
+    a_acknum = packet.seqnum;
 
-    a_acknum = (a_acknum + 1) % 2;
-    a_seqnum = (a_seqnum + 1) % 2;
+    // Iterate buffer, acking packets <= packet.acknum.
+    struct node *current = buffer;
+    struct node *temp;
+    while (current->next != NULL)
+    {
+      temp = current->next;
+      if (temp->p->seqnum <= packet.acknum)
+      {
+      }
+    }
+
+    tolayer5(A, packet.payload);
   }
 }
 

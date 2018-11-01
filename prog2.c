@@ -104,7 +104,7 @@ A_input(packet) struct pkt packet;
 {
   stoptimer(A);
 
-  // Verify checksum.
+  // Calculate checksum.
   int checksum;
   checksum = packet.seqnum + packet.acknum;
 
@@ -120,7 +120,7 @@ A_input(packet) struct pkt packet;
     tolayer3(A, *a_prev_pkt);
   }
 
-  // ACK, move on.
+  // ACK, proceed.
   else if (packet.seqnum == a_acknum)
   {
     tolayer5(A, packet.payload);
@@ -142,11 +142,13 @@ A_timerinterrupt()
 /* entity A routines are called. You can use it to do any initialization */
 A_init()
 {
+  // My timer increment was arbitrarilly chosen. I'd ultimately like to
+  // base my increment on RTT and increment as needed on time-out.
+  timer_inc = 12.0;
+
   a_acknum = 0;
   a_seqnum = 0;
-  timer_inc = 12.0;
   a_prev_pkt = malloc(sizeof(struct pkt));
-  // determine RTT
 }
 
 /* Note that with simplex transfer from a-to-B, there is no B_output() */
@@ -167,7 +169,7 @@ B_input(packet) struct pkt packet;
   // Packet sequence number expected, proceed.
   else
   {
-    // Verify checksum.
+    // Calculate checksum.
     int checksum;
     checksum = packet.seqnum + packet.acknum;
 
