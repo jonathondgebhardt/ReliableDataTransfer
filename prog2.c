@@ -1,10 +1,12 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 /**
  * Assignment 2
  * Jonathon Gebhardt
+ * Alternating Bit
  **/
 
 /* ******************************************************************
@@ -55,13 +57,10 @@ struct pkt *a_prev_pkt;
 
 int b_seqnum;
 int b_acknum;
-struct pkt *b_prev_pkt;
 
 /* called from layer 5, passed the data to be sent to other side */
 A_output(message) struct msg message;
 {
-  // If message is in transit, drop.
-
   // Calculate checksum.
   int checksum;
   checksum = a_seqnum + a_acknum;
@@ -71,6 +70,7 @@ A_output(message) struct msg message;
     checksum += message.data[i];
   }
 
+  // Prepare packet for transmit.
   struct pkt p = {
       a_seqnum,
       a_acknum,
@@ -89,7 +89,7 @@ A_output(message) struct msg message;
     a_prev_pkt->payload[i] = p.payload[i];
   }
 
-  // Start timer and send packet.
+  // Start timer and transmit packet.
   starttimer(A, timer_inc);
   tolayer3(A, p);
 }
@@ -102,6 +102,8 @@ B_output(message) /* need be completed only for extra credit */
 /* called from layer 3, when a packet arrives for layer 4 */
 A_input(packet) struct pkt packet;
 {
+  stoptimer(A);
+
   // Verify checksum.
   int checksum;
   checksum = packet.seqnum + packet.acknum;
@@ -111,22 +113,16 @@ A_input(packet) struct pkt packet;
     checksum += packet.payload[i];
   }
 
+  // Corrupted packet or NAK, retransmit.
   if (packet.checksum != checksum || packet.seqnum == -1)
   {
-    printf("A: bad checksum(%d) or bad seqnum(%d), retransmit\n",
-           packet.checksum != checksum, packet.seqnum == -1);
-    // ask for retransmit
-
-    getchar();
-    getchar();
-
-    stoptimer(A);
     starttimer(A, timer_inc);
     tolayer3(A, *a_prev_pkt);
   }
-  else
+
+  // ACK, move on.
+  else if (packet.seqnum == a_acknum)
   {
-    stoptimer(A);
     tolayer5(A, packet.payload);
 
     a_acknum = (a_acknum + 1) % 2;
@@ -137,8 +133,7 @@ A_input(packet) struct pkt packet;
 /* called when A's timer goes off */
 A_timerinterrupt()
 {
-  // If A's timer expires, that means a packet was lost (i.e., not ACK'd)
-  // so retransmit.
+  // Packet was lost, retransmit.
   starttimer(A, timer_inc);
   tolayer3(A, *a_prev_pkt);
 }
@@ -159,32 +154,49 @@ A_init()
 /* called from layer 3, when a packet arrives for layer 4 at B*/
 B_input(packet) struct pkt packet;
 {
-  // verify checksum
-  int checksum;
-  checksum = packet.seqnum + packet.acknum;
-
-  for (int i = 0; i < sizeof(packet.payload); ++i)
+  // Packet sequence number unexpected, drop and ACK so A can move on.
+  if (packet.seqnum != b_acknum)
   {
-    checksum += packet.payload[i];
-  }
-
-  if (packet.checksum != checksum)
-  {
-    printf("B: bad checksum(%d), retransmit\n",
-           packet.checksum != checksum);
-
-    struct pkt response = {packet.seqnum, -1, (packet.seqnum - 1)};
-
-    tolayer3(B, response);
-  }
-  else
-  {
-    tolayer5(B, packet.payload);
-
-    struct pkt response = {packet.seqnum, packet.acknum, (response.seqnum + response.acknum)};
+    struct pkt response = {packet.seqnum, packet.acknum,
+                           (packet.seqnum + packet.acknum)};
     memset(response.payload, '\0', sizeof(response.payload));
 
     tolayer3(B, response);
+  }
+
+  // Packet sequence number expected, proceed.
+  else
+  {
+    // Verify checksum.
+    int checksum;
+    checksum = packet.seqnum + packet.acknum;
+
+    for (int i = 0; i < sizeof(packet.payload); ++i)
+    {
+      checksum += packet.payload[i];
+    }
+
+    // Bad checksum, NAK.
+    if (packet.checksum != checksum)
+    {
+      struct pkt response = {packet.seqnum, -1, (packet.seqnum - 1)};
+      tolayer3(B, response);
+    }
+
+    // Good packet, ACK.
+    else
+    {
+      tolayer5(B, packet.payload);
+
+      struct pkt response = {packet.seqnum, packet.acknum,
+                             (packet.seqnum + packet.acknum)};
+      memset(response.payload, '\0', sizeof(response.payload));
+
+      b_seqnum = (b_seqnum + 1) % 2;
+      b_acknum = (b_acknum + 1) % 2;
+
+      tolayer3(B, response);
+    }
   }
 }
 
@@ -197,9 +209,8 @@ B_timerinterrupt()
 /* entity B routines are called. You can use it to do any initialization */
 B_init()
 {
-  b_acknum = 0;
   b_seqnum = 0;
-  b_prev_pkt = malloc(sizeof(struct pkt));
+  b_acknum = 0;
 }
 
 /*****************************************************************
