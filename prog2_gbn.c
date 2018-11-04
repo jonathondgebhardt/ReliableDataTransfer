@@ -108,7 +108,6 @@ A_output(message) struct msg message;
   current->next->p = push_back;
   current->next->next = NULL;
   current->next->status = 0;
-
   a_window--;
 
   // Start timer and transmit packet.
@@ -124,12 +123,15 @@ B_output(message) /* need be completed only for extra credit */
 /* called from layer 3, when a packet arrives for layer 4 */
 A_input(packet) struct pkt packet;
 {
+  printf("A: received acknum %d\n", packet.acknum);
+
   stoptimer(A);
 
   // Verify checksum.
   int checksum;
   checksum = packet.seqnum + packet.acknum;
 
+  // Can remove from checksum.
   for (int i = 0; i < sizeof(packet.payload); ++i)
   {
     checksum += packet.payload[i];
@@ -139,24 +141,37 @@ A_input(packet) struct pkt packet;
   if (packet.checksum != checksum)
   {
     starttimer(A, timer_inc);
+    printf("A: bad checksum, retransmit\n");
     // tolayer3(A, *a_prev_pkt);
   }
 
   // ACK, move on.
   else
   {
+    printf("A: acking\n");
+
     a_acknum = packet.seqnum;
 
     // Iterate buffer, acking packets <= packet.acknum.
-    struct node *current = buffer;
-    struct node *temp;
-    while (current->next != NULL)
+    struct node *current = buffer->next;
+    int count = 0;
+    while (current != NULL)
     {
-      temp = current->next;
-      if (temp->p->seqnum <= packet.acknum)
+      struct pkt *p = current->p;
+      if (p->seqnum > packet.acknum)
       {
+        break;
       }
+
+      printf("\tA: removing packet with payload %c\n", p->payload[0]);
+
+      current = current->next;
+      buffer->next = current;
+      a_window++;
+      count++;
     }
+
+    printf("\tA: removed %d packets from buffer\n", count);
 
     tolayer5(A, packet.payload);
   }
@@ -167,7 +182,14 @@ A_timerinterrupt()
 {
   // Packet was lost, retransmit.
   starttimer(A, timer_inc);
+
   // Iterate buffer, retransmit unack'd packets
+  struct node *current = buffer->next;
+  while (current != NULL)
+  {
+    tolayer3(A, *current->p);
+    current = current->next;
+  }
 }
 
 /* the following routine will be called once (only) before any other */
@@ -189,12 +211,17 @@ A_init()
 /* called from layer 3, when a packet arrives for layer 4 at B*/
 B_input(packet) struct pkt packet;
 {
+  printf("B: received seqnum %d\n", packet.seqnum);
+
   // Packet sequence number unexpected, drop and ACK so A can move on.
   if (packet.seqnum != b_acknum)
   {
-    struct pkt response = {packet.seqnum, packet.acknum,
-                           (packet.seqnum + packet.acknum)};
+    printf("B: packet out of order, dropping and telling A\n");
+    struct pkt response = {b_seqnum, b_acknum - 1,
+                           (b_seqnum + (b_acknum - 1))};
     memset(response.payload, '\0', sizeof(response.payload));
+
+    b_seqnum++;
 
     tolayer3(B, response);
   }
@@ -214,6 +241,7 @@ B_input(packet) struct pkt packet;
     // Bad checksum, NAK.
     if (packet.checksum != checksum)
     {
+      printf("B: bad checksum, dropping and telling A\n");
       struct pkt response = {packet.seqnum, -1, (packet.seqnum - 1)};
       tolayer3(B, response);
     }
@@ -221,14 +249,16 @@ B_input(packet) struct pkt packet;
     // Good packet, ACK.
     else
     {
+      printf("B: good packet, acking\n");
+
       tolayer5(B, packet.payload);
 
-      struct pkt response = {packet.seqnum, packet.acknum,
-                             (packet.seqnum + packet.acknum)};
+      struct pkt response = {b_seqnum, b_acknum,
+                             (b_seqnum + b_acknum)};
       memset(response.payload, '\0', sizeof(response.payload));
 
-      b_seqnum = (b_seqnum + 1) % 2;
-      b_acknum = (b_acknum + 1) % 2;
+      b_seqnum++;
+      b_acknum++;
 
       tolayer3(B, response);
     }
