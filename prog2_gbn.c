@@ -54,12 +54,13 @@ float timer_inc;
 int a_seqnum;
 int a_acknum;
 int a_window;
+
 struct node
 {
   struct pkt *p;
   struct node *next;
-  int status;
 };
+
 struct node *buffer;
 
 int b_seqnum;
@@ -68,51 +69,56 @@ int b_acknum;
 /* called from layer 5, passed the data to be sent to other side */
 A_output(message) struct msg message;
 {
-  // Calculate checksum.
-  int checksum;
-  checksum = a_seqnum + a_acknum;
-
-  for (int i = 0; i < sizeof(message.data); ++i)
+  // Only transmit if there's more space in the window.
+  if (a_window > 0)
   {
-    checksum += message.data[i];
+    // Calculate checksum.
+    int checksum;
+    checksum = a_seqnum + a_acknum;
+
+    for (int i = 0; i < sizeof(message.data); ++i)
+    {
+      checksum += message.data[i];
+    }
+
+    // Prepare packet for transmit.
+    struct pkt p = {
+        a_seqnum,
+        a_acknum,
+        checksum,
+    };
+
+    strcpy(p.payload, message.data);
+
+    // Make copy of packet.
+    struct pkt *push_back = malloc(sizeof(struct pkt));
+    push_back->seqnum = p.seqnum;
+    push_back->acknum = p.acknum;
+    push_back->checksum = p.checksum;
+
+    for (int i = 0; i < sizeof(p.payload); ++i)
+    {
+      push_back->payload[i] = p.payload[i];
+    }
+
+    // Insert packet at end of list.
+    struct node *current = buffer;
+    while (current->next != NULL)
+    {
+      current = current->next;
+    }
+
+    current->next = malloc(sizeof(struct node));
+    current->next->p = push_back;
+    current->next->next = NULL;
+
+    // Start timer and transmit packet.
+    starttimer(A, timer_inc);
+    tolayer3(A, p);
+
+    a_seqnum++;
+    a_window--;
   }
-
-  // Prepare packet for transmit.
-  struct pkt p = {
-      a_seqnum++,
-      a_acknum,
-      checksum,
-  };
-
-  strcpy(p.payload, message.data);
-
-  // Add packet to buffer and decrement window size.
-  struct pkt *push_back = malloc(sizeof(struct pkt));
-  push_back->seqnum = p.seqnum;
-  push_back->acknum = p.acknum;
-  push_back->checksum = p.checksum;
-
-  for (int i = 0; i < sizeof(p.payload); ++i)
-  {
-    push_back->payload[i] = p.payload[i];
-  }
-
-  // Find end of list and insert. Leave the head in tact.
-  struct node *current = buffer;
-  while (current->next != NULL)
-  {
-    current = current->next;
-  }
-
-  current->next = malloc(sizeof(struct node));
-  current->next->p = push_back;
-  current->next->next = NULL;
-  current->next->status = 0;
-  a_window--;
-
-  // Start timer and transmit packet.
-  starttimer(A, timer_inc);
-  tolayer3(A, p);
 }
 
 B_output(message) /* need be completed only for extra credit */
@@ -123,38 +129,37 @@ B_output(message) /* need be completed only for extra credit */
 /* called from layer 3, when a packet arrives for layer 4 */
 A_input(packet) struct pkt packet;
 {
-  printf("A: received acknum %d\n", packet.acknum);
-
   stoptimer(A);
 
-  // Verify checksum.
+  // Calculate checksum.
   int checksum;
   checksum = packet.seqnum + packet.acknum;
 
-  // Can remove from checksum.
   for (int i = 0; i < sizeof(packet.payload); ++i)
   {
     checksum += packet.payload[i];
   }
 
-  // Corrupted packet or NAK, retransmit.
+  // Corrupted packet, retransmit.
   if (packet.checksum != checksum)
   {
     starttimer(A, timer_inc);
-    printf("A: bad checksum, retransmit\n");
-    // tolayer3(A, *a_prev_pkt);
+
+    struct node *current = buffer->next;
+    while (current != NULL)
+    {
+      tolayer3(A, *current->p);
+      current = current->next;
+    }
   }
 
   // ACK, move on.
   else
   {
-    printf("A: acking\n");
-
     a_acknum = packet.seqnum;
 
     // Iterate buffer, acking packets <= packet.acknum.
     struct node *current = buffer->next;
-    int count = 0;
     while (current != NULL)
     {
       struct pkt *p = current->p;
@@ -163,15 +168,10 @@ A_input(packet) struct pkt packet;
         break;
       }
 
-      printf("\tA: removing packet with payload %c\n", p->payload[0]);
-
       current = current->next;
       buffer->next = current;
       a_window++;
-      count++;
     }
-
-    printf("\tA: removed %d packets from buffer\n", count);
 
     tolayer5(A, packet.payload);
   }
@@ -180,7 +180,6 @@ A_input(packet) struct pkt packet;
 /* called when A's timer goes off */
 A_timerinterrupt()
 {
-  // Packet was lost, retransmit.
   starttimer(A, timer_inc);
 
   // Iterate buffer, retransmit unack'd packets
@@ -198,12 +197,17 @@ A_init()
 {
   a_acknum = 0;
   a_seqnum = 0;
-  timer_inc = 12.0;
+
+  // Timer increment was arbitrarily chosen. I'd ultimately like to base
+  // my increment on RTT and increment as needed on time-out.
+  timer_inc = 10.0;
+
+  // Window size chosen by the project prompt suggestion.
   a_window = 50;
+
   buffer = malloc(sizeof(struct node));
   buffer->p = NULL;
   buffer->next = NULL;
-  // determine RTT
 }
 
 /* Note that with simplex transfer from a-to-B, there is no B_output() */
@@ -211,57 +215,48 @@ A_init()
 /* called from layer 3, when a packet arrives for layer 4 at B*/
 B_input(packet) struct pkt packet;
 {
-  printf("B: received seqnum %d\n", packet.seqnum);
 
-  // Packet sequence number unexpected, drop and ACK so A can move on.
-  if (packet.seqnum != b_acknum)
+  // Verify checksum.
+  int checksum;
+  checksum = packet.seqnum + packet.acknum;
+  for (int i = 0; i < sizeof(packet.payload); ++i)
   {
-    printf("B: packet out of order, dropping and telling A\n");
-    struct pkt response = {b_seqnum, b_acknum - 1,
-                           (b_seqnum + (b_acknum - 1))};
-    memset(response.payload, '\0', sizeof(response.payload));
-
-    b_seqnum++;
-
-    tolayer3(B, response);
+    checksum += packet.payload[i];
   }
 
-  // Packet sequence number expected, proceed.
+  // Bad checksum or out-of-order packet, drop and ACK so A can move on.
+  if (packet.checksum != checksum || packet.seqnum != b_acknum)
+  {
+    // Subtract one from acknowledgment because that's the last good
+    // packet received.
+    struct pkt response = {
+        b_seqnum,
+        b_acknum - 1,
+        (b_seqnum + (b_acknum - 1)),
+    };
+    memset(response.payload, '\0', sizeof(response.payload));
+
+    tolayer3(B, response);
+
+    b_seqnum++;
+  }
+
+  // Good packet, ACK.
   else
   {
-    // Verify checksum.
-    int checksum;
-    checksum = packet.seqnum + packet.acknum;
+    tolayer5(B, packet.payload);
 
-    for (int i = 0; i < sizeof(packet.payload); ++i)
-    {
-      checksum += packet.payload[i];
-    }
+    struct pkt response = {
+        b_seqnum,
+        b_acknum,
+        (b_seqnum + b_acknum),
+    };
+    memset(response.payload, '\0', sizeof(response.payload));
 
-    // Bad checksum, NAK.
-    if (packet.checksum != checksum)
-    {
-      printf("B: bad checksum, dropping and telling A\n");
-      struct pkt response = {packet.seqnum, -1, (packet.seqnum - 1)};
-      tolayer3(B, response);
-    }
+    tolayer3(B, response);
 
-    // Good packet, ACK.
-    else
-    {
-      printf("B: good packet, acking\n");
-
-      tolayer5(B, packet.payload);
-
-      struct pkt response = {b_seqnum, b_acknum,
-                             (b_seqnum + b_acknum)};
-      memset(response.payload, '\0', sizeof(response.payload));
-
-      b_seqnum++;
-      b_acknum++;
-
-      tolayer3(B, response);
-    }
+    b_seqnum++;
+    b_acknum++;
   }
 }
 

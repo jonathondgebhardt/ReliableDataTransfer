@@ -159,8 +159,11 @@ B_input(packet) struct pkt packet;
   // Packet sequence number unexpected, drop and ACK so A can move on.
   if (packet.seqnum != b_acknum)
   {
-    struct pkt response = {packet.seqnum, packet.acknum,
-                           (packet.seqnum + packet.acknum)};
+    struct pkt response = {
+        packet.seqnum,
+        packet.acknum,
+        (packet.seqnum + packet.acknum),
+    };
     memset(response.payload, '\0', sizeof(response.payload));
 
     tolayer3(B, response);
@@ -181,7 +184,13 @@ B_input(packet) struct pkt packet;
     // Bad checksum, NAK.
     if (packet.checksum != checksum)
     {
-      struct pkt response = {packet.seqnum, -1, (packet.seqnum - 1)};
+      struct pkt response = {
+          packet.seqnum,
+          -1,
+          (packet.seqnum - 1),
+      };
+      memset(response.payload, '\0', sizeof(response.payload));
+
       tolayer3(B, response);
     }
 
@@ -190,14 +199,17 @@ B_input(packet) struct pkt packet;
     {
       tolayer5(B, packet.payload);
 
-      struct pkt response = {packet.seqnum, packet.acknum,
-                             (packet.seqnum + packet.acknum)};
+      struct pkt response = {
+          packet.seqnum,
+          packet.acknum,
+          (packet.seqnum + packet.acknum),
+      };
       memset(response.payload, '\0', sizeof(response.payload));
+
+      tolayer3(B, response);
 
       b_seqnum = (b_seqnum + 1) % 2;
       b_acknum = (b_acknum + 1) % 2;
-
-      tolayer3(B, response);
     }
   }
 }
