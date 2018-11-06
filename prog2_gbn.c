@@ -168,9 +168,14 @@ A_input(packet) struct pkt packet;
         break;
       }
 
+      struct node *temp = current;
+
       current = current->next;
       buffer->next = current;
       a_window++;
+
+      free(temp);
+      temp = NULL;
     }
 
     tolayer5(A, packet.payload);
