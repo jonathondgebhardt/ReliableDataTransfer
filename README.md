@@ -14,6 +14,8 @@ Also commonly referred to as 'Stop-and-Wait'. Host A sends one packet and waits 
 
 ### Flow Chart
 ![Alt text](img/AlternatingBit.png?raw=true "Alternating Bit Flow Chart")
+
+
 Created using draw.io
 
 ## Go-Back-N
@@ -21,4 +23,6 @@ Host A does not need to wait for an acknowledgment before sending packets to Hos
 
 ### Flow Chart
 ![Alt text](img/GoBackN.png?raw=true "Alternating Bit Flow Chart")
+
+
 Created using draw.io
