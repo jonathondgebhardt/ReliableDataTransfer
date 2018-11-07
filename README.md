@@ -1,7 +1,7 @@
 # ReliableDataTransfer
-
-## Computer Networks and Security
-CEG4400-01 | Fall 2018 | Dr. Bin Wang
+- Class: CEG4400-01 -- Computer Networks and Security
+- Semester: Fall 2018
+- Instructor: Dr. Bin Wang
 
 ## Introduction
 A reliable data transfer protocol is critical for sending information over a non-perfect network medium with any certainty that the data sent is the data received. Retransmitting data in the event of network loss or corruption is necessary to ensure data is received in the correct order and without flipped bits.
